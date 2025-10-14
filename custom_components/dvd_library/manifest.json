@@ -1,7 +1,7 @@
 {
     "domain": "dvd_library",
     "name": "DVD Library",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "documentation": "https://example.local/dvd_library",
     "requirements": [],
     "dependencies": [],
