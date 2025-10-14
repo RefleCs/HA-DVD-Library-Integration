@@ -1,0 +1,59 @@
+add_item:
+  name: Add DVD
+  description: Add a DVD by title, barcode or IMDb ID
+  fields:
+    title:
+      description: Movie title
+      example: "The Matrix"
+    year:
+      description: Release year
+      example: "1999"
+    barcode:
+      description: EAN/UPC barcode
+      example: "7321931145014"
+    imdb_id:
+      description: IMDb ID (tt...)
+      example: "tt0133093"
+    added_by:
+      description: Free-form note
+      example: "Rob"
+update_item:
+  name: Update DVD
+  fields:
+    selector:
+      example: { "imdb_id": "tt0133093" }
+    updates:
+      example: { "title": "The Matrix (Remastered)" }
+remove_item:
+  name: Remove DVD
+  fields:
+    imdb_id:
+      example: "tt0133093"
+    barcode:
+      example: "7321931145014"
+    title:
+      example: "The Matrix"
+refresh_metadata:
+  name: Refresh metadata
+  fields:
+    imdb_id:
+      example: "tt0133093"
+    barcode:
+      example: "7321931145014"
+    title:
+      example: "The Matrix"
+import_json:
+  name: Import JSON
+  fields:
+    path:
+      example: "dvd_import.json"
+purge_nulls:
+  name: Purge empty items
+  description: Remove items where title, year, barcode, and imdb_id are all empty or null
+remove_index:
+  name: Remove DVD by index (owner/admin)
+  description: Remove a DVD by its zero-based index in the collection (fallback when no identifiers exist)
+  fields:
+    index:
+      description: Zero-based index from the items list
+      example: 0
