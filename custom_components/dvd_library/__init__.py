@@ -316,4 +316,56 @@ def _register_services_once(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "add_item", wrap(s_add))
     hass.services.async_register(DOMAIN, "update_item", wrap(s_update))
     hass.services.async_register(DOMAIN, "remove_item", wrap(s_remove))
-    hass
+    hass.services.async_register(DOMAIN, "remove_index", wrap(s_remove_index))
+    hass.services.async_register(DOMAIN, "refresh_metadata", wrap(s_refresh))
+    hass.services.async_register(DOMAIN, "import_json", wrap(s_import_json))
+    hass.services.async_register(DOMAIN, "purge_nulls", wrap(s_purge))
+
+    domain_data["services_registered"] = True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up a DVD Library instance from a config entry."""
+    api_key = (entry.data.get(CONF_OMDB_API_KEY) or entry.options.get(CONF_OMDB_API_KEY) or "").strip() or None
+
+    lib = DvdLibrary(hass, api_key)
+    await lib.async_load()
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[entry.entry_id] = {"lib": lib}
+
+    _register_services_once(hass)
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a DVD Library instance."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        domain_data: dict = hass.data.get(DOMAIN, {})
+        domain_data.pop(entry.entry_id, None)
+
+        # If last one removed, also remove services
+        has_instances = any(k for k in domain_data.keys() if k != "services_registered")
+        if not has_instances:
+            for srv in (
+                "add_item",
+                "update_item",
+                "remove_item",
+                "remove_index",
+                "refresh_metadata",
+                "import_json",
+                "purge_nulls",
+            ):
+                hass.services.async_remove(DOMAIN, srv)
+            hass.data.pop(DOMAIN, None)
+
+    return unload_ok
+
+
+# Options flow hook
+async def async_get_options_flow(config_entry: ConfigEntry):
+    from .config_flow import OptionsFlowHandler  # local import to avoid circular
+    return OptionsFlowHandler(config_entry)
