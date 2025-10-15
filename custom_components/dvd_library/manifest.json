@@ -5,5 +5,8 @@
   "documentation": "https://github.com/RefleCs/HA-DVD-Library-Integration",
   "issue_tracker": "https://github.com/RefleCs/HA-DVD-Library-Integration/issues",
   "codeowners": ["@RefleCs"],
-  "iot_class": "cloud_polling"
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "config_flow": true
 }
