@@ -1,7 +1,7 @@
 {
   "domain": "dvd_library",
   "name": "DVD Library",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "documentation": "https://github.com/RefleCs/HA-DVD-Library-Integration",
   "issue_tracker": "https://github.com/RefleCs/HA-DVD-Library-Integration/issues",
   "codeowners": ["@RefleCs"],
