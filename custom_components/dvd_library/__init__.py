@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Final, Optional
+from typing import Final, Optional, Dict, List
 
 import json
 import logging
@@ -47,13 +47,24 @@ class DvdLibrary:
         await self.store.async_save({"items": self.items})
         async_dispatcher_send(self.hass, SIGNAL_LIBRARY_UPDATED)
 
-    def _find_index(self, key: str, value: str) -> Optional[int]:
-        for idx, it in enumerate(self.items):
-            if it.get(key) and it.get(key) == value:
-                return idx
-        return None
+    # -------------------------- helpers / validation ------------------------ #
 
-    # --- helpers ------------------------------------------------------------ #
+    @staticmethod
+    def _parse_box(value) -> Optional[int]:
+        """Return an integer box number or None if value is None/empty; raise on invalid."""
+        if value is None:
+            return None
+        # Accept strings like "12" but reject empty or non-digit
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                return None
+            if not value.isdigit():
+                raise ValueError("Box must be an integer")
+            return int(value)
+        if isinstance(value, (int,)):
+            return int(value)
+        raise ValueError("Box must be an integer")
 
     @staticmethod
     def _is_empty_item(it: dict) -> bool:
@@ -62,6 +73,14 @@ class DvdLibrary:
 
         keys = ("title", "year", "barcode", "imdb_id")
         return all(empty(it.get(k)) for k in keys)
+
+    def _find_index(self, key: str, value: str) -> Optional[int]:
+        for idx, it in enumerate(self.items):
+            if it.get(key) and it.get(key) == value:
+                return idx
+        return None
+
+    # ------------------------------- operations ---------------------------- #
 
     async def purge_nulls(self) -> int:
         """Remove items where title/year/barcode/imdb_id are all empty/null."""
@@ -84,16 +103,17 @@ class DvdLibrary:
         )
         await self._async_save_and_signal()
 
-    # --- main ops ----------------------------------------------------------- #
-
     async def add_item(self, data: dict) -> None:
         """Add or merge a DVD item; enrich via OMDb if possible."""
+        box = self._parse_box(data.get("box"))
+
         item = {
             "title": data.get("title"),
             "year": str(data.get("year")) if data.get("year") else None,
             "barcode": data.get("barcode"),
             "imdb_id": data.get("imdb_id"),
             "added_by": data.get("added_by"),
+            "box": box,  # integer or None
         }
 
         # Enrich with OMDb (if key present)
@@ -138,7 +158,10 @@ class DvdLibrary:
                     break
 
         if idx is not None:
-            self.items[idx].update(item)
+            # Merge; preserve integer box
+            if item.get("box") is not None:
+                self.items[idx]["box"] = item["box"]
+            self.items[idx].update({k: v for k, v in item.items() if k != "box"})
             _LOGGER.debug(
                 "Updated existing item at %s: %s",
                 idx,
@@ -162,6 +185,11 @@ class DvdLibrary:
                 break
         if idx is None:
             raise ValueError("Item not found for selector")
+
+        # Validate box if present
+        if "box" in updates:
+            updates = dict(updates)  # shallow copy
+            updates["box"] = self._parse_box(updates["box"])
 
         self.items[idx].update(updates)
 
@@ -224,6 +252,32 @@ class DvdLibrary:
                 self.items[idx].update(meta)
 
         await self._async_save_and_signal()
+
+    # ------------------------------ box helpers ---------------------------- #
+
+    async def move_box(self, from_box: int, to_box: int) -> int:
+        """Move all items with box == from_box to to_box. Returns count moved."""
+        from_box_int = self._parse_box(from_box)
+        to_box_int = self._parse_box(to_box)
+        if from_box_int is None or to_box_int is None:
+            raise ValueError("Both from_box and to_box must be integers")
+        moved = 0
+        for it in self.items:
+            if it.get("box") == from_box_int:
+                it["box"] = to_box_int
+                moved += 1
+        if moved:
+            await self._async_save_and_signal()
+        return moved
+
+    def list_boxes(self) -> Dict[int, int]:
+        """Return a dict {box: count} for all items that have a box number."""
+        counts: Dict[int, int] = {}
+        for it in self.items:
+            b = it.get("box")
+            if isinstance(b, int):
+                counts[b] = counts.get(b, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: kv[0]))
 
 
 # -------------------------- HA integration scaffolding ---------------------- #
@@ -312,6 +366,30 @@ def _register_services_once(hass: HomeAssistant) -> None:
         removed = await lib.purge_nulls()
         _LOGGER.info("Purged %s empty items from DVD library", removed)
 
+    # NEW: set_box
+    async def s_set_box(lib: DvdLibrary, call: ServiceCall) -> None:
+        selector = call.data.get("selector") or {}
+        box = call.data.get("box")
+        if box is None:
+            raise ValueError("Provide 'box' (integer)")
+        await lib.update_item(selector, {"box": box})
+
+    # NEW: move_box (bulk)
+    async def s_move_box(lib: DvdLibrary, call: ServiceCall) -> None:
+        from_box = call.data.get("from_box")
+        to_box = call.data.get("to_box")
+        if from_box is None or to_box is None:
+            raise ValueError("Provide 'from_box' and 'to_box' (integers)")
+        moved = await lib.move_box(from_box, to_box)
+        _LOGGER.info("Moved %s items from box %s to %s", moved, from_box, to_box)
+
+    # NEW: list_boxes
+    async def s_list_boxes(lib: DvdLibrary, call: ServiceCall) -> None:
+        counts = lib.list_boxes()
+        boxes = sorted(counts.keys())
+        hass.bus.async_fire("dvd_library_boxes", {"boxes": boxes, "counts": counts})
+        _LOGGER.info("Boxes in use: %s", boxes)
+
     # Register services under the domain
     hass.services.async_register(DOMAIN, "add_item", wrap(s_add))
     hass.services.async_register(DOMAIN, "update_item", wrap(s_update))
@@ -320,6 +398,9 @@ def _register_services_once(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "refresh_metadata", wrap(s_refresh))
     hass.services.async_register(DOMAIN, "import_json", wrap(s_import_json))
     hass.services.async_register(DOMAIN, "purge_nulls", wrap(s_purge))
+    hass.services.async_register(DOMAIN, "set_box", wrap(s_set_box))      # NEW
+    hass.services.async_register(DOMAIN, "move_box", wrap(s_move_box))    # NEW
+    hass.services.async_register(DOMAIN, "list_boxes", wrap(s_list_boxes))# NEW
 
     domain_data["services_registered"] = True
 
@@ -358,6 +439,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "refresh_metadata",
                 "import_json",
                 "purge_nulls",
+                "set_box",
+                "move_box",
+                "list_boxes",
             ):
                 hass.services.async_remove(DOMAIN, srv)
             hass.data.pop(DOMAIN, None)
@@ -369,3 +453,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_get_options_flow(config_entry: ConfigEntry):
     from .config_flow import OptionsFlowHandler  # local import to avoid circular
     return OptionsFlowHandler(config_entry)
+``
