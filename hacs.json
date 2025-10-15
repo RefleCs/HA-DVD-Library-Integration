@@ -1,5 +1,5 @@
 {
-  "name": "DVD Library Integration",
+  "name": "DVD Library",
   "render_readme": true,
-  "content_in_root": true
+  "homeassistant": "2024.8.0"
 }
