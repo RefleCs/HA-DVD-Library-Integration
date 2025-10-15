@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Final, Optional, Dict, List
+from typing import Final, Optional, Dict
 
 import json
 import logging
 import os
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -54,7 +53,6 @@ class DvdLibrary:
         """Return an integer box number or None if value is None/empty; raise on invalid."""
         if value is None:
             return None
-        # Accept strings like "12" but reject empty or non-digit
         if isinstance(value, str):
             value = value.strip()
             if value == "":
@@ -62,8 +60,8 @@ class DvdLibrary:
             if not value.isdigit():
                 raise ValueError("Box must be an integer")
             return int(value)
-        if isinstance(value, (int,)):
-            return int(value)
+        if isinstance(value, int):
+            return value
         raise ValueError("Box must be an integer")
 
     @staticmethod
@@ -142,7 +140,6 @@ class DvdLibrary:
                 "Skipping add: no imdb_id/barcode/title (no usable metadata matched)"
             )
             return
-
         # Dedup logic
         idx: Optional[int] = None
         if item.get("imdb_id"):
@@ -309,7 +306,6 @@ def _register_services_once(hass: HomeAssistant) -> None:
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("services_registered"):
         return
-
     def wrap(handler):
         async def _inner(call: ServiceCall):
             try:
@@ -366,7 +362,6 @@ def _register_services_once(hass: HomeAssistant) -> None:
         removed = await lib.purge_nulls()
         _LOGGER.info("Purged %s empty items from DVD library", removed)
 
-    # NEW: set_box
     async def s_set_box(lib: DvdLibrary, call: ServiceCall) -> None:
         selector = call.data.get("selector") or {}
         box = call.data.get("box")
@@ -374,7 +369,6 @@ def _register_services_once(hass: HomeAssistant) -> None:
             raise ValueError("Provide 'box' (integer)")
         await lib.update_item(selector, {"box": box})
 
-    # NEW: move_box (bulk)
     async def s_move_box(lib: DvdLibrary, call: ServiceCall) -> None:
         from_box = call.data.get("from_box")
         to_box = call.data.get("to_box")
@@ -383,14 +377,12 @@ def _register_services_once(hass: HomeAssistant) -> None:
         moved = await lib.move_box(from_box, to_box)
         _LOGGER.info("Moved %s items from box %s to %s", moved, from_box, to_box)
 
-    # NEW: list_boxes
     async def s_list_boxes(lib: DvdLibrary, call: ServiceCall) -> None:
         counts = lib.list_boxes()
         boxes = sorted(counts.keys())
         hass.bus.async_fire("dvd_library_boxes", {"boxes": boxes, "counts": counts})
         _LOGGER.info("Boxes in use: %s", boxes)
 
-    # Register services under the domain
     hass.services.async_register(DOMAIN, "add_item", wrap(s_add))
     hass.services.async_register(DOMAIN, "update_item", wrap(s_update))
     hass.services.async_register(DOMAIN, "remove_item", wrap(s_remove))
@@ -398,9 +390,9 @@ def _register_services_once(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "refresh_metadata", wrap(s_refresh))
     hass.services.async_register(DOMAIN, "import_json", wrap(s_import_json))
     hass.services.async_register(DOMAIN, "purge_nulls", wrap(s_purge))
-    hass.services.async_register(DOMAIN, "set_box", wrap(s_set_box))      # NEW
-    hass.services.async_register(DOMAIN, "move_box", wrap(s_move_box))    # NEW
-    hass.services.async_register(DOMAIN, "list_boxes", wrap(s_list_boxes))# NEW
+    hass.services.async_register(DOMAIN, "set_box", wrap(s_set_box))
+    hass.services.async_register(DOMAIN, "move_box", wrap(s_move_box))
+    hass.services.async_register(DOMAIN, "list_boxes", wrap(s_list_boxes))
 
     domain_data["services_registered"] = True
 
@@ -453,4 +445,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_get_options_flow(config_entry: ConfigEntry):
     from .config_flow import OptionsFlowHandler  # local import to avoid circular
     return OptionsFlowHandler(config_entry)
-``
