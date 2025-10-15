@@ -4,6 +4,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import callback, HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, SIGNAL_LIBRARY_UPDATED
 
@@ -13,22 +14,31 @@ async def async_setup_entry(
 ) -> None:
     """Set up the DVD Library sensor for a config entry."""
     lib = hass.data[DOMAIN][entry.entry_id]["lib"]
-    unique_id = f"dvd_library_{entry.entry_id}_count"
-    async_add_entities([DvdLibrarySensor(lib, unique_id)], True)
+    async_add_entities([DvdLibrarySensor(lib, entry)], True)
 
 
 class DvdLibrarySensor(SensorEntity):
-    """Sensor showing the number of items and exposing the collection as an attribute."""
+    """Shows the number of DVDs and exposes the collection as an attribute."""
 
     _attr_name = "DVD Library"
     _attr_icon = "mdi:filmstrip-box"
+    _attr_should_poll = False
+    # Stable unique_id so the registry keeps using sensor.dvd_library
+    _attr_unique_id = "dvd_library_count"
 
-    def __init__(self, library, unique_id: str) -> None:
+    def __init__(self, library, entry: ConfigEntry) -> None:
         self.library = library
         self._attr_native_value = 0
         self._attr_extra_state_attributes = {"items": []}
-        self._attr_unique_id = unique_id
+        self._entry_id = entry.entry_id
         self._unsub = None
+        # Optional, just to group the entity under a device
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._entry_id)},
+            name="DVD Library",
+            manufacturer="Custom",
+            model="Library",
+        )
 
     async def async_added_to_hass(self) -> None:
         @callback
@@ -40,7 +50,8 @@ class DvdLibrarySensor(SensorEntity):
         self._unsub = async_dispatcher_connect(
             self.hass, SIGNAL_LIBRARY_UPDATED, _updated
         )
-        _updated()  # push initial state
+        # Push initial state immediately
+        _updated()
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsub:
