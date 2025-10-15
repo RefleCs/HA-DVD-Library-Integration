@@ -17,13 +17,20 @@ add_item:
     added_by:
       description: Free-form note
       example: "Rob"
+    box:
+      description: Integer box number (storage location)
+      example: 12
+
 update_item:
   name: Update DVD
   fields:
     selector:
+      description: Identify the item by imdb_id, barcode or title
       example: { "imdb_id": "tt0133093" }
     updates:
-      example: { "title": "The Matrix (Remastered)" }
+      description: Fields to update (e.g., title, year, box). 'box' must be an integer.
+      example: { "box": 12, "title": "The Matrix (Remastered)" }
+
 remove_item:
   name: Remove DVD
   fields:
@@ -33,6 +40,7 @@ remove_item:
       example: "7321931145014"
     title:
       example: "The Matrix"
+
 refresh_metadata:
   name: Refresh metadata
   fields:
@@ -42,18 +50,47 @@ refresh_metadata:
       example: "7321931145014"
     title:
       example: "The Matrix"
+
 import_json:
   name: Import JSON
   fields:
     path:
       example: "dvd_import.json"
+
 purge_nulls:
   name: Purge empty items
   description: Remove items where title, year, barcode, and imdb_id are all empty or null
+
 remove_index:
   name: Remove DVD by index (owner/admin)
-  description: Remove a DVD by its zero-based index in the collection (fallback when no identifiers exist)
+  description: Remove a DVD by its zero-based index in the collection
   fields:
     index:
       description: Zero-based index from the items list
       example: 0
+
+set_box:
+  name: Set box for a DVD
+  description: Assign or change the storage box for a single DVD (integer only)
+  fields:
+    selector:
+      description: Identify the item by imdb_id, barcode or title
+      example: { "barcode": "7321931145014" }
+    box:
+      description: Target box number (integer)
+      example: 7
+
+move_box:
+  name: Bulk move all DVDs from one box to another
+  description: Move every item with box == from_box to to_box (integers only)
+  fields:
+    from_box:
+      description: Current box number to move from
+      example: 3
+    to_box:
+      description: Destination box number
+      example: 5
+
+list_boxes:
+  name: List all used box numbers
+  description: Emits an event 'dvd_library_boxes' with a sorted 'boxes' array and 'counts' per box.
