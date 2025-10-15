@@ -1,0 +1,24 @@
+{
+  "title": "DVD Library",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up DVD Library",
+        "description": "Enter your OMDb API key (optional).",
+        "data": {
+          "omdb_api_key": "OMDb API key"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DVD Library options",
+        "data": {
+          "omdb_api_key": "OMDb API key"
+        }
+      }
+    }
+  }
+}

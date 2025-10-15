@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity
@@ -8,14 +9,10 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, SIGNAL_LIBRARY_UPDATED
 
-
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
     """Set up the DVD Library sensor for a config entry."""
     lib = hass.data[DOMAIN][entry.entry_id]["lib"]
     async_add_entities([DvdLibrarySensor(lib, entry)], True)
-
 
 class DvdLibrarySensor(SensorEntity):
     """Shows the number of DVDs and exposes the collection as an attribute."""
@@ -23,8 +20,7 @@ class DvdLibrarySensor(SensorEntity):
     _attr_name = "DVD Library"
     _attr_icon = "mdi:filmstrip-box"
     _attr_should_poll = False
-    # Stable unique_id so the registry keeps using sensor.dvd_library
-    _attr_unique_id = "dvd_library_count"
+    _attr_unique_id = "dvd_library_count"  # stable unique_id
 
     def __init__(self, library, entry: ConfigEntry) -> None:
         self.library = library
@@ -32,7 +28,6 @@ class DvdLibrarySensor(SensorEntity):
         self._attr_extra_state_attributes = {"items": []}
         self._entry_id = entry.entry_id
         self._unsub = None
-        # Optional, just to group the entity under a device
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._entry_id)},
             name="DVD Library",
@@ -47,10 +42,7 @@ class DvdLibrarySensor(SensorEntity):
             self._attr_extra_state_attributes = {"items": self.library.items}
             self.async_write_ha_state()
 
-        self._unsub = async_dispatcher_connect(
-            self.hass, SIGNAL_LIBRARY_UPDATED, _updated
-        )
-        # Push initial state immediately
+        self._unsub = async_dispatcher_connect(self.hass, SIGNAL_LIBRARY_UPDATED, _updated)
         _updated()
 
     async def async_will_remove_from_hass(self) -> None:

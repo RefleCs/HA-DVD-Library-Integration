@@ -1,28 +1,40 @@
+
+from __future__ import annotations
+
 import json
 import urllib.parse
 import urllib.request
 
 BASE_URL = "https://www.omdbapi.com/"
 
-def fetch_omdb(api_key: str, title: str | None = None, imdb_id: str | None = None, year: str | None = None):
+def fetch_omdb(api_key: str | None, title: str | None, imdb_id: str | None, year: str | None) -> dict | None:
+    """Blocking HTTP fetch to OMDb (called in an executor)."""
     if not api_key:
         return None
-    params = {"apikey": api_key, "type": "movie"}
+
+    params: dict[str, str] = {"apikey": api_key, "type": "movie"}
+
     if imdb_id:
         params["i"] = imdb_id
     elif title:
         params["t"] = title
-        if year:
-            params["y"] = year
     else:
         return None
+
+    if year:
+        params["y"] = str(year)
 
     url = BASE_URL + "?" + urllib.parse.urlencode(params)
     with urllib.request.urlopen(url, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    if data.get("Response") != "True":
+    if str(data.get("Response")) != "True":
         return None
+
+    poster = data.get("Poster")
+    if poster == "N/A":
+        poster = None
+
     return {
         "title": data.get("Title"),
         "year": data.get("Year"),
@@ -32,7 +44,7 @@ def fetch_omdb(api_key: str, title: str | None = None, imdb_id: str | None = Non
         "director": data.get("Director"),
         "actors": data.get("Actors"),
         "plot": data.get("Plot"),
-        "poster": data.get("Poster") if data.get("Poster") and data.get("Poster") != "N/A" else None,
+        "poster": poster,
         "imdb_rating": data.get("imdbRating"),
         "rated": data.get("Rated"),
         "released": data.get("Released"),

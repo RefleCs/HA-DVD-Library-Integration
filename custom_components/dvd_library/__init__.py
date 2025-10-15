@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from typing import Final, Optional, Dict
@@ -5,6 +6,7 @@ from typing import Final, Optional, Dict
 import json
 import logging
 import os
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -26,8 +28,6 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: Final = [Platform.SENSOR]
 
 
-# ---------------------------- Core library model ---------------------------- #
-
 class DvdLibrary:
     """In-memory + persisted collection with optional OMDb enrichment."""
 
@@ -46,11 +46,8 @@ class DvdLibrary:
         await self.store.async_save({"items": self.items})
         async_dispatcher_send(self.hass, SIGNAL_LIBRARY_UPDATED)
 
-    # -------------------------- helpers / validation ------------------------ #
-
     @staticmethod
     def _parse_box(value) -> Optional[int]:
-        """Return an integer box number or None if value is None/empty; raise on invalid."""
         if value is None:
             return None
         if isinstance(value, str):
@@ -68,7 +65,6 @@ class DvdLibrary:
     def _is_empty_item(it: dict) -> bool:
         def empty(v):
             return v is None or (isinstance(v, str) and v.strip() == "")
-
         keys = ("title", "year", "barcode", "imdb_id")
         return all(empty(it.get(k)) for k in keys)
 
@@ -78,10 +74,7 @@ class DvdLibrary:
                 return idx
         return None
 
-    # ------------------------------- operations ---------------------------- #
-
     async def purge_nulls(self) -> int:
-        """Remove items where title/year/barcode/imdb_id are all empty/null."""
         before = len(self.items)
         self.items = [it for it in self.items if not self._is_empty_item(it)]
         removed = before - len(self.items)
@@ -102,45 +95,31 @@ class DvdLibrary:
         await self._async_save_and_signal()
 
     async def add_item(self, data: dict) -> None:
-        """Add or merge a DVD item; enrich via OMDb if possible."""
         box = self._parse_box(data.get("box"))
-
         item = {
             "title": data.get("title"),
             "year": str(data.get("year")) if data.get("year") else None,
             "barcode": data.get("barcode"),
             "imdb_id": data.get("imdb_id"),
             "added_by": data.get("added_by"),
-            "box": box,  # integer or None
+            "box": box,
         }
-
-        # Enrich with OMDb (if key present)
         try:
-            meta = (
-                await self.hass.async_add_executor_job(
-                    fetch_omdb,
-                    self.api_key,
-                    item.get("title"),
-                    item.get("imdb_id"),
-                    item.get("year"),
+            if self.api_key:
+                meta = await self.hass.async_add_executor_job(
+                    fetch_omdb, self.api_key, item.get("title"), item.get("imdb_id"), item.get("year")
                 )
-                if self.api_key
-                else None
-            )
-            if meta:
-                item.update(meta)
-        except Exception as e:  # noqa: BLE001
+                if meta:
+                    item.update(meta)
+            else:
+                _LOGGER.debug("Skipping OMDb enrichment: no API key configured")
+        except Exception as e:
             _LOGGER.warning("OMDb lookup failed: %s", e)
 
-        # Guard against empty adds
-        if not any(
-            [item.get("imdb_id"), item.get("barcode"), (item.get("title") or "").strip()]
-        ):
-            _LOGGER.warning(
-                "Skipping add: no imdb_id/barcode/title (no usable metadata matched)"
-            )
+        if not any([item.get("imdb_id"), item.get("barcode"), (item.get("title") or "").strip()]):
+            _LOGGER.warning("Skipping add: no imdb_id/barcode/title (no usable metadata matched)")
             return
-        # Dedup logic
+
         idx: Optional[int] = None
         if item.get("imdb_id"):
             idx = self._find_index("imdb_id", item["imdb_id"])
@@ -148,28 +127,18 @@ class DvdLibrary:
             idx = self._find_index("barcode", item["barcode"])
         if idx is None and item.get("title"):
             for i, it in enumerate(self.items):
-                if it.get("title") == item["title"] and (
-                    not item.get("year") or it.get("year") == item.get("year")
-                ):
+                if it.get("title") == item["title"] and (not item.get("year") or it.get("year") == item.get("year")):
                     idx = i
                     break
 
         if idx is not None:
-            # Merge; preserve integer box
             if item.get("box") is not None:
                 self.items[idx]["box"] = item["box"]
             self.items[idx].update({k: v for k, v in item.items() if k != "box"})
-            _LOGGER.debug(
-                "Updated existing item at %s: %s",
-                idx,
-                item.get("title") or item.get("imdb_id") or item.get("barcode"),
-            )
+            _LOGGER.debug("Updated existing item at %s: %s", idx, item.get("title") or item.get("imdb_id") or item.get("barcode"))
         else:
             self.items.append(item)
-            _LOGGER.debug(
-                "Added new item: %s",
-                item.get("title") or item.get("imdb_id") or item.get("barcode"),
-            )
+            _LOGGER.debug("Added new item: %s", item.get("title") or item.get("imdb_id") or item.get("barcode"))
 
         await self._async_save_and_signal()
 
@@ -183,14 +152,12 @@ class DvdLibrary:
         if idx is None:
             raise ValueError("Item not found for selector")
 
-        # Validate box if present
         if "box" in updates:
-            updates = dict(updates)  # shallow copy
+            updates = dict(updates)
             updates["box"] = self._parse_box(updates["box"])
 
         self.items[idx].update(updates)
 
-        # Re-enrich if relevant fields changed
         if any(k in updates for k in ("title", "year", "imdb_id")) and self.api_key:
             meta = await self.hass.async_add_executor_job(
                 fetch_omdb,
@@ -211,22 +178,14 @@ class DvdLibrary:
         idx = self._find_index(key, selector[key])
         if idx is None:
             raise ValueError("Item not found")
-
         removed = self.items.pop(idx)
-        _LOGGER.debug(
-            "Removed item by %s=%s: %s",
-            key,
-            selector[key],
-            removed.get("title") or removed.get("imdb_id") or removed.get("barcode"),
-        )
+        _LOGGER.debug("Removed item by %s=%s: %s", key, selector[key], removed.get("title") or removed.get("imdb_id") or removed.get("barcode"))
         await self._async_save_and_signal()
 
     async def refresh_metadata(self, selector: dict | None = None) -> None:
         targets: list[int] = []
         if selector:
-            key = next(
-                (k for k in ("imdb_id", "barcode", "title") if selector.get(k)), None
-            )
+            key = next((k for k in ("imdb_id", "barcode", "title") if selector.get(k)), None)
             if key:
                 idx = self._find_index(key, selector[key])
                 if idx is not None:
@@ -234,26 +193,18 @@ class DvdLibrary:
         if not targets:
             targets = list(range(len(self.items)))
         if not self.api_key:
-            return  # nothing to do
-
+            _LOGGER.debug("Skipping OMDb refresh: no API key configured")
+            return
         for idx in targets:
             it = self.items[idx]
             meta = await self.hass.async_add_executor_job(
-                fetch_omdb,
-                self.api_key,
-                it.get("title"),
-                it.get("imdb_id"),
-                it.get("year"),
+                fetch_omdb, self.api_key, it.get("title"), it.get("imdb_id"), it.get("year")
             )
             if meta:
                 self.items[idx].update(meta)
-
         await self._async_save_and_signal()
 
-    # ------------------------------ box helpers ---------------------------- #
-
     async def move_box(self, from_box: int, to_box: int) -> int:
-        """Move all items with box == from_box to to_box. Returns count moved."""
         from_box_int = self._parse_box(from_box)
         to_box_int = self._parse_box(to_box)
         if from_box_int is None or to_box_int is None:
@@ -268,7 +219,6 @@ class DvdLibrary:
         return moved
 
     def list_boxes(self) -> Dict[int, int]:
-        """Return a dict {box: count} for all items that have a box number."""
         counts: Dict[int, int] = {}
         for it in self.items:
             b = it.get("box")
@@ -277,35 +227,26 @@ class DvdLibrary:
         return dict(sorted(counts.items(), key=lambda kv: kv[0]))
 
 
-# -------------------------- HA integration scaffolding ---------------------- #
-
 async def async_setup(hass: HomeAssistant, config) -> bool:
-    """Legacy setup hook (no YAML config handled here)."""
     return True
 
 
 def _get_lib_from_call(hass: HomeAssistant, call: ServiceCall) -> DvdLibrary:
-    """Resolve target library for a service call.
-
-    If service data includes 'entry_id', that instance is used; otherwise first loaded.
-    """
     domain_data: dict = hass.data.get(DOMAIN) or {}
     entry_id = call.data.get("entry_id")
     if entry_id and entry_id in domain_data:
         return domain_data[entry_id]["lib"]
-
     for key, val in domain_data.items():
         if key != "services_registered":
             return val["lib"]
-
     raise HomeAssistantError("No DVD Library instances are loaded.")
 
 
 def _register_services_once(hass: HomeAssistant) -> None:
-    """Register domain services once (shared across all instances)."""
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("services_registered"):
         return
+
     def wrap(handler):
         async def _inner(call: ServiceCall):
             try:
@@ -313,25 +254,16 @@ def _register_services_once(hass: HomeAssistant) -> None:
                 await handler(lib, call)
             except (ValueError, PermissionError) as e:
                 raise HomeAssistantError(str(e)) from e
-            except Exception as e:  # noqa: BLE001
-                _LOGGER.exception(
-                    "Unexpected error in dvd_library service %s", handler.__name__
-                )
-                raise HomeAssistantError(
-                    "Unexpected error; see logs for details."
-                ) from e
-
+            except Exception as e:
+                _LOGGER.exception("Unexpected error in dvd_library service %s", handler.__name__)
+                raise HomeAssistantError("Unexpected error; see logs for details.") from e
         return _inner
-
-    # --- services (domain-level) ------------------------------------------ #
 
     async def s_add(lib: DvdLibrary, call: ServiceCall) -> None:
         await lib.add_item(call.data)
 
     async def s_update(lib: DvdLibrary, call: ServiceCall) -> None:
-        await lib.update_item(
-            call.data.get("selector", {}), call.data.get("updates", {})
-        )
+        await lib.update_item(call.data.get("selector", {}), call.data.get("updates", {}))
 
     async def s_remove(lib: DvdLibrary, call: ServiceCall) -> None:
         await lib.remove_item(call.data)
@@ -399,7 +331,11 @@ def _register_services_once(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a DVD Library instance from a config entry."""
-    api_key = (entry.data.get(CONF_OMDB_API_KEY) or entry.options.get(CONF_OMDB_API_KEY) or "").strip() or None
+    def _read_key(e: ConfigEntry) -> Optional[str]:
+        key = (e.data.get(CONF_OMDB_API_KEY) or e.options.get(CONF_OMDB_API_KEY) or "").strip()
+        return key or None
+
+    api_key = _read_key(entry)
 
     lib = DvdLibrary(hass, api_key)
     await lib.async_load()
@@ -409,18 +345,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _register_services_once(hass)
 
+    async def _options_updated(hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
+        new_key = _read_key(updated_entry)
+        lib.api_key = new_key
+        _LOGGER.info("DVD Library OMDb API key updated via Options")
+
+    entry.async_on_unload(entry.add_update_listener(_options_updated))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a DVD Library instance."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         domain_data: dict = hass.data.get(DOMAIN, {})
         domain_data.pop(entry.entry_id, None)
-
-        # If last one removed, also remove services
         has_instances = any(k for k in domain_data.keys() if k != "services_registered")
         if not has_instances:
             for srv in (
@@ -437,11 +377,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ):
                 hass.services.async_remove(DOMAIN, srv)
             hass.data.pop(DOMAIN, None)
-
     return unload_ok
 
 
-# Options flow hook
 async def async_get_options_flow(config_entry: ConfigEntry):
-    from .config_flow import OptionsFlowHandler  # local import to avoid circular
+    from .config_flow import OptionsFlowHandler
     return OptionsFlowHandler(config_entry)
